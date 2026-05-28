@@ -228,7 +228,8 @@
     border-radius: var(--r-lg);
     border: 1px solid var(--line);
     overflow: hidden;
-    transition: aspect-ratio 0.25s ease;
+    /* スクロール許可(pinch-zoomは許す、double-tap-zoomだけブロック) */
+    touch-action: manipulation;
   }
   .flframe.rot {
     aspect-ratio: calc(1 / 1.9380);
@@ -237,7 +238,7 @@
     position: absolute;
     inset: 0;
     user-select: none;
-    touch-action: none;
+    touch-action: manipulation;
     transform-origin: 0 0;
     /* rotated 状態では JS が width/height/transform を上書き */
   }
@@ -426,23 +427,30 @@
   }
   rotated = preferPortrait();
 
-  // 回転適用 (CSS transform で .fl を90°CW + 寸法スワップ)
+  // 回転適用. .fl のサイズは flframe の CSS 制約幅から解析的に計算する
+  // (getBoundingClientRect だと aspect-ratio の反映タイミングで古い値を引き
+  // 「図面が極端に小さくなる」バグを起こすため).
   function applyRotation() {
     flframe.classList.toggle('rot', rotated);
     document.getElementById('bt-rotfl').classList.toggle('act', rotated);
-    if (rotated) {
-      const r = flframe.getBoundingClientRect();
-      // 余白がない瞬間に呼ばれると 0 になりうるので保護
-      if (r.width && r.height) {
-        fl.style.width = r.height + 'px';
-        fl.style.height = r.width + 'px';
-        fl.style.transform = 'translate(' + r.width + 'px, 0) rotate(90deg)';
-      }
-    } else {
+    if (!rotated) {
       fl.style.width = '';
       fl.style.height = '';
       fl.style.transform = '';
+      return;
     }
+    // clientWidth の読み出しで同期 reflow を強制(直前のクラス変更を確定させる)
+    const fw = flframe.clientWidth;
+    if (!fw) {
+      // レイアウト未完了(初回ロード直後) → 次フレームで再試行
+      requestAnimationFrame(applyRotation);
+      return;
+    }
+    // rotated 時の flframe アスペクトは 1/(VB_W/VB_H) → flframe height = fw * VB_W/VB_H
+    const fh = fw * (VB_W / VB_H);
+    fl.style.width = fh + 'px';
+    fl.style.height = fw + 'px';
+    fl.style.transform = 'translate(' + fw + 'px, 0) rotate(90deg)';
   }
 
   function rb() {
@@ -654,10 +662,11 @@
     if (ev.button !== undefined && ev.button !== 0) return;
     ev.preventDefault(); ev.stopPropagation();
     sp(p);
-    const fr = flframe.getBoundingClientRect();
-    // .fl の自然サイズ(rotated でも回転前の論理サイズ)
-    const nat_w = rotated ? fr.height : fr.width;
-    const nat_h = rotated ? fr.width : fr.height;
+    const fw = flframe.clientWidth;
+    // rotated 時の flframe は portrait なので CSS height = fw * VB_W/VB_H
+    // .fl の自然サイズ(回転前の論理サイズ): rotated 時は flframe の縦が natural width
+    const nat_w = rotated ? fw * (VB_W / VB_H) : fw;
+    const nat_h = rotated ? fw : fw / (VB_W / VB_H);
     const k_x = VB_W / nat_w / 10;
     const k_y = VB_H / nat_h / 10;
     const sX = p.cx, sY = p.cy;
